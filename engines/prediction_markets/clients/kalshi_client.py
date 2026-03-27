@@ -16,6 +16,7 @@ BASES = [
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 CACHE_PATH = PROJECT_ROOT / "data" / "kalshi_cache.json"
 CACHE_MAX_AGE_SEC = 4 * 3600
+MAX_FETCH_RETRIES = 3
 
 
 def _to_float(v: object) -> float:
@@ -82,12 +83,31 @@ class KalshiClient:
             params: dict = {"limit": 200, "status": status}
             if cursor:
                 params["cursor"] = cursor
-            try:
-                r = requests.get(f"{base}/markets", params=params, timeout=60)
-                r.raise_for_status()
-                body = r.json()
-            except Exception as e:
-                logger.warning("Kalshi markets fetch failed: {}", e)
+            body = None
+            last_err: Exception | None = None
+            for attempt in range(1, MAX_FETCH_RETRIES + 1):
+                try:
+                    r = requests.get(f"{base}/markets", params=params, timeout=60)
+                    r.raise_for_status()
+                    body = r.json()
+                    break
+                except Exception as e:
+                    last_err = e
+                    if attempt < MAX_FETCH_RETRIES:
+                        backoff_s = 2 ** (attempt - 1)
+                        logger.warning(
+                            "Kalshi markets fetch failed (attempt {}/{}): {}. Retrying in {}s",
+                            attempt, MAX_FETCH_RETRIES, e, backoff_s,
+                        )
+                        time.sleep(backoff_s)
+                    else:
+                        logger.warning(
+                            "Kalshi markets fetch failed after {} attempts: {}",
+                            MAX_FETCH_RETRIES, e,
+                        )
+
+            if body is None:
+                logger.warning("Kalshi markets fetch failed: {}", last_err)
                 cached, age = self._read_cache()
                 if cached and age is not None and age < CACHE_MAX_AGE_SEC:
                     logger.warning("Using Kalshi cache age {:.0f}s", age)

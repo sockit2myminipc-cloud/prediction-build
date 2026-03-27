@@ -107,6 +107,36 @@ class NewsImpactScorer:
             logger.debug("Ollama unavailable: {}", e)
             return None
 
+    @staticmethod
+    def _parse_ollama_json(raw: str) -> dict | None:
+        raw = raw.strip()
+        if not raw:
+            return None
+
+        # Common case: fenced markdown JSON from model responses.
+        fence = re.search(r"```(?:json)?\s*([\s\S]*?)```", raw, flags=re.IGNORECASE)
+        candidates = [fence.group(1).strip()] if fence else []
+        candidates.append(raw)
+
+        for candidate in candidates:
+            try:
+                parsed = json.loads(candidate)
+                if isinstance(parsed, dict):
+                    return parsed
+            except json.JSONDecodeError:
+                pass
+
+            # Next best: pull first JSON object from mixed prose.
+            m = re.search(r"\{[\s\S]*\}", candidate)
+            if m:
+                try:
+                    parsed = json.loads(m.group(0))
+                    if isinstance(parsed, dict):
+                        return parsed
+                except json.JSONDecodeError:
+                    pass
+        return None
+
     def extract_entities(self, article_text: str, headline: str) -> dict:
         text = article_text or headline
         sys = (
@@ -121,15 +151,10 @@ class NewsImpactScorer:
         )
         raw = self._ollama_chat(sys, user)
         if raw:
-            try:
-                m = re.search(r"\{[\s\S]*\}", raw)
-                blob = m.group(0) if m else raw
-                parsed = json.loads(blob)
-                if isinstance(parsed, dict):
-                    return parsed
-                logger.debug("Ollama entity response was not a JSON object; falling back to keywords")
-            except json.JSONDecodeError:
-                logger.debug("Ollama entity JSON parse failed; falling back to keywords")
+            parsed = self._parse_ollama_json(raw)
+            if parsed is not None:
+                return parsed
+            logger.debug("Ollama entity JSON parse failed; falling back to keywords")
         return _keyword_entities(text, headline)
 
     def match_markets(self, entities: dict, all_markets: list[dict]) -> list[dict]:

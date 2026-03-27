@@ -26,8 +26,10 @@ NEWS_QUERY_BATCHES = [
 
 _CACHE_TTL_SEC = 6 * 3600  # 6 hours — don't re-fetch same batch within this window
 _MAX_DAILY_CALLS = 80       # leave 20-call buffer on the 100/day dev key
+_RATE_LIMIT_COOLDOWN_SEC = 12 * 3600  # dev keys replenish every 12h window
 _NEWSAPI_CACHE: dict[str, tuple[float, list[dict]]] = {}  # query → (fetch_time, articles)
 _DAILY_CALL_COUNT: dict[str, int] = {}  # "YYYY-MM-DD" → calls made
+_RATE_LIMIT_UNTIL_TS: float = 0.0
 
 RSS_FEEDS = [
     "https://feeds.reuters.com/reuters/topNews",
@@ -52,14 +54,27 @@ class NewsIngester:
         self._newsapi = NewsApiClient(api_key=key) if key else None
 
     def poll_newsapi(self) -> list[dict]:
+        global _RATE_LIMIT_UNTIL_TS
         if not self._newsapi:
             logger.debug("NEWSAPI_KEY not set; skipping NewsAPI")
+            return []
+
+        now_ts = time.time()
+        if now_ts < _RATE_LIMIT_UNTIL_TS:
+            cooldown_left = int(_RATE_LIMIT_UNTIL_TS - now_ts)
+            logger.warning(
+                "NewsAPI in cooldown after rate limit ({}s remaining) — skipping",
+                cooldown_left,
+            )
+            today = dt.date.today().isoformat()
+            set_newsapi_status(_DAILY_CALL_COUNT.get(today, 0), dt.datetime.now(dt.UTC))
             return []
 
         today = dt.date.today().isoformat()
         calls_today = _DAILY_CALL_COUNT.get(today, 0)
         if calls_today >= _MAX_DAILY_CALLS:
             logger.warning("NewsAPI daily limit reached ({}/{}) — skipping until tomorrow", calls_today, _MAX_DAILY_CALLS)
+            set_newsapi_status(calls_today, dt.datetime.now(dt.UTC))
             return []
 
         out: list[dict] = []
@@ -96,6 +111,13 @@ class NewsIngester:
                 set_newsapi_status(_DAILY_CALL_COUNT[today], dt.datetime.now(dt.UTC))
             except Exception as e:
                 logger.warning("NewsAPI query batch failed: {}", e)
+                if _is_rate_limit_error(e):
+                    _RATE_LIMIT_UNTIL_TS = time.time() + _RATE_LIMIT_COOLDOWN_SEC
+                    logger.warning(
+                        "NewsAPI reported rate-limited. Entering cooldown for {} hours.",
+                        _RATE_LIMIT_COOLDOWN_SEC // 3600,
+                    )
+                    break
         return out
 
     def poll_rss(self) -> list[dict]:
@@ -199,3 +221,8 @@ def _parse_pub(v: object) -> dt.datetime | None:
         except ValueError:
             return None
     return None
+
+
+def _is_rate_limit_error(err: Exception) -> bool:
+    msg = str(err).lower()
+    return "ratelimited" in msg or "too many requests" in msg or "429" in msg
