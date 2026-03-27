@@ -1,0 +1,3340 @@
+PREDICTION MARKET
+RESEARCH & BETTING ENGINE
+Complete Build 
+Guide  •
+  Step-by-Step with Cursor + Claude Prompts
+Sports  •
+  
+Elections  •
+  
+Crypto  •
+  
+Macro  •
+  
+Geopolitics  •
+  News
+This is a standalone prediction market research and automated betting engine. It is a different project from the trading bot — where the trading bot uses prediction markets as one signal among many, this system treats prediction markets as the primary market. News, statistics, and cross-platform arbitrage are the signal layer on top.
+📡  What
+ It Watches
+Polymarket
+ — thousands of active markets
+Kalshi — US-regulated macro + event markets
+Live news feeds (RSS, 
+NewsAPI
+, Reddit)
+Sports data APIs (stats + odds)
+Polling aggregators (elections)
+CME futures (macro cross-check)
+Vegas / exchange odds (sports arbitrage)
+🎯  What
+ It Does
+Finds mispriced markets before they correct
+Detects news → market price lag windows
+Spots mathematical arbitrage across platforms
+Tracks probability velocity (not just snapshots)
+Logs paper bets and 
+tracks
+ real outcomes
+Alerts you to high-EV opportunities via Telegram
+Eventually automates bet execution via API
+Market Categories Covered
+Category
+What 
+Polymarket
+ / Kalshi Has
+Signal Cross-Check Source
+Sports
+NFL, NBA, MLB, NHL, Soccer, Golf, Combat Sports
+Vegas odds + statistical model cross-check
+Elections
+Global elections, leadership, policy decisions
+Polling aggregators + modelling cross-check
+Crypto & Finance
+Price targets, ETF decisions, exchange events
+CME futures + on-chain data cross-check
+Macro Economics
+Fed decisions, CPI, recession, GDP, unemployment
+Fed Funds futures cross-check
+Geopolitics
+Wars, treaties, sanctions, leadership changes
+News velocity + sentiment cross-check
+Science & Tech
+AI milestones, product launches, regulation
+News + analyst consensus cross-check
+Entertainment
+Awards, box office, cultural events
+Historical base rates cross-check
+Build Sequence Overview
+Phase
+What Gets Built
+Target
+Phase 1
+Foundation & Data Layer
+Week 1
+Phase 2
+News Ingestion & NLP
+Week 2
+Phase 3
+Statistical Baselines & Outlier Detection
+Week 3
+Phase 4
+Paper Betting System & Performance Tracking
+Week 4
+Phase 5
+Velocity, Arbitrage & Correlation Scanners
+Week 5–6
+Phase 6
+OpenClaw
+ Skills & Telegram Alerts
+Week 6
+Phase 6.5
+Strategy Governance & Learning Loop
+Week 7–8
+Phase 7
+Automation & Live Bet Execution
+After 3 months paper data
+Runtime Architecture — Three Layers the Agent Reasons About
+OpenClaw
+ should not “improve the whole thing” at once. It should improve one strategy module at a time. Separating the system into three distinct layers enforces that discipline.
+LAYER 1 — DATA LAYER
+  market ingestion • news ingestion • baseline ingestion
+  feature generation • labeling and resolution updates
+LAYER 2 — STRATEGY LAYER
+  
+news_lag_strategy
+ • 
+outlier_strategy
+ • 
+velocity_strategy
+  
+arbitrage_strategy
+ • ensemble/
+meta_strategy
+ (later)
+LAYER 3 — AGENT LAYER
+  monitor health • review strategy performance
+  propose config changes • run 
+backtests
+  promote/demote strategies
+  NEVER directly push live changes without gates
+PHASE 1
+Foundation & Data Layer
+Build the ingestion and storage backbone for all market data
+Everything else depends on this layer being solid. Do not move to Phase 2 until all validation checks below pass. You are building a system that ingests thousands of markets across multiple categories — the database schema and cache layer need to be right from the start.
+STEP
+1
+Project Scaffold & Environment
+Target: Day 1
+⚡  CURSOR
+ PROMPT — Paste this into Cursor AI
+Create engines/
+prediction_markets
+/ with this structure:
+engines/
+prediction_markets
+/
+├── clients/
+│   ├── polymarket_client.py      # All 
+Polymarket
+ API calls
+│   ├── kalshi_client.py          # All Kalshi API calls
+│   ├── newsapi_client.py         # News ingestion
+│   └── sports_client.py          # Sports data + odds
+├── filters/
+│   ├── market_filter.py          # Relevance scoring
+│   └── dedup.py                  # Cross-platform deduplication
+├── tracking/
+│   ├── probability_tracker.py    # Time-series per market
+│   └── knowledge_base.py        # SQLite query interface
+├── analysis/
+│   ├── outlier_detector.py       # Market vs baseline divergence
+│   ├── news_impact_scorer.py     # News → market matching
+│   ├── velocity_scanner.py       # Probability momentum
+│   └── arbitrage_scanner.py      # Cross-market math checks
+├── betting/
+│   ├── paper_bettor.py           # Log + track paper bets
+│   ├── opportunity_ranker.py     # EV-ranked bet queue
+│   └── bet_executor.py           # (
+Phase 7) live API execution
+├── alerts/
+│   └── alert_service.py          # Telegram + email alerts
+├── storage/
+│   ├── models.py                 # 
+SQLAlchemy
+ models
+│   └── db.py                     # Session factory
+├── skills/                        #
+ 
+OpenClaw
+ skill files
+└── main.py                        # Polling orchestrator
+Add to requirements.txt:
+  requests, 
+loguru
+, 
+sqlalchemy
+, schedule, pandas
+  
+newsapi
+-python, 
+feedparser
+, beautifulsoup4
+  
+rapidfuzz
+  #
+ fuzzy match for 
+dedup
+STEP
+2
+Database Models
+Target: Day 1
+⚡  CURSOR
+ PROMPT — Paste this into Cursor AI
+In engines/
+prediction_markets
+/storage/models.py, create these 
+SQLAlchemy
+ tables:
+1. Market
+   id (PK), platform ('
+polymarket
+'|'
+kalshi
+'), 
+market_id
+, question, category,
+   theme, slug, liquidity, volume_24h, 
+end_date
+, 
+is_active
+,
+   
+low_confidence
+ (bool), 
+first_seen
+, 
+last_updated
+2. 
+ProbabilityReading
+   id (PK), 
+market_id
+ (
+FK→Market
+), timestamp, probability, volume,
+   quality ('
+ok'|'stale
+'), 
+source_platform
+   Index on: (
+market_id
+, timestamp), (
+market_id
+, quality, timestamp)
+3. 
+NewsArticle
+   id (PK), source, headline, 
+body_text
+, 
+url
+, 
+published_at
+, 
+fetched_at
+,
+   
+entities_
+json
+  #
+ extracted names, teams, events, tickers
+4. 
+NewsMarketLink
+   id (PK), 
+article_id
+ (FK), 
+market_id
+ (FK), 
+relevance_score
+ (0-1),
+   
+created_at
+   # Links news articles to affected prediction markets
+5. 
+PaperBet
+   id (PK), 
+market_id
+ (FK), question, platform, category,
+   
+bet_direction
+ ('YES'|'NO'), 
+probability_at_bet
+, 
+implied_odds
+,
+   
+stake_units
+ (always 1.0 for paper), 
+trigger_type
+   ('
+news_lag'|'outlier'|'velocity'|'arbitrage'|'manual
+'),
+   
+trigger_detail_json
+, 
+placed_at
+, 
+resolved_at
+,
+   outcome ('WIN'|'LOSS'|'VOID'|'PENDING'), 
+pnl_units
+6. 
+StatisticalBaseline
+   id (PK), 
+market_id
+ (FK), 
+source_name
+, 
+baseline_probability
+,
+   
+baseline_type
+ ('
+elo
+'|'polling'|'futures'|'
+vegas
+'|'model'),
+   
+fetched_at
+, notes
+7. 
+HealthLog
+   id (PK), timestamp, 
+markets_tracked
+, 
+ok_markets
+, 
+stale_markets
+,
+   
+news_articles_today
+, 
+paper_bets_open
+, 
+last_signal_score
+, notes
+Governance Tables (add in Phase 6.5 — required before agent self-improvement)
+8. 
+StrategyVersion
+   id (PK), 
+strategy_name
+, version, 
+feature_set_json
+, 
+rule_params_json
+,
+   
+created_at
+, 
+created_by
+ ('human'|'
+openclaw
+'|'
+auto_train
+'),
+   status ('
+sandbox'|'paper_active'|'challenger'|'champion'|'retired
+'), notes
+9. 
+StrategyPerformanceSnapshot
+   id (PK), 
+strategy_version_id
+ (FK), 
+as_of_date
+, category, 
+signal_type
+,
+   
+bets_count
+, 
+win_rate
+, 
+pnl_units
+, 
+roi_percent
+, 
+max_drawdown
+,
+   
+avg_ev
+, 
+calibration_error
+, 
+resolution_lag_hours
+10. 
+SignalEvent
+  #
+ training row — written every time a signal 
+fires
+   id (PK), 
+market_id
+ (FK), 
+strategy_version_id
+ (FK), 
+signal_type
+, 
+fired_at
+,
+   
+snapshot_probability
+, liquidity, spread, volume_24h, theme, 
+relevance_score
+,
+   
+ev_estimate
+, velocity, acceleration, 
+recent_news_count
+,
+   
+baseline_probability
+, divergence, 
+expected_direction
+,
+   
+auto_paper_bet_taken
+, 
+final_outcome
+, 
+final_pnl
+, 
+label_resolved_at
+11. 
+AgentActionLog
+   id (PK), agent ('
+openclaw
+'|'human'), action, result ('
+allowed'|'blocked'|'pending
+'),
+   
+strategy_version_id
+ (FK, nullable), 
+details_json
+, timestamp
+12. 
+RuleArtifact
+  #
+ versioned snapshot of a rule-based strategy's full config
+   id (PK), 
+strategy_version_id
+ (FK), 
+artifact_type
+ ('rule_config'|'
+weight_map
+'),
+   
+artifact_json
+, 
+created_at
+   # Use this to 
+replay:
+ load the artifact, re-run signals, compare outcomes
+13. 
+PromotionDecision
+  #
+ full audit trail of every champion change
+   id (PK), 
+strategy_name
+, 
+from_version_id
+ (FK), 
+to_version_id
+ (FK),
+   decision ('promoted'|'rejected'|'
+rolled_back
+'),
+   
+decided_by
+ ('human'|'
+openclaw
+'), 
+decided_at
+,
+   
+champion_roi_before
+, 
+challenger_roi
+, 
+roi_delta
+,
+   
+champion_drawdown_before
+, 
+challenger_drawdown
+,
+   
+gates_passed_json
+, 
+gates_failed_json
+, notes
+STEP
+3
+Polymarket
+ Client — Full Coverage
+Target: Day 2
+Remove the crypto-only filter from the original Path 6 design. This client now pulls ALL active markets across every category and stores everything. Filtering happens in a separate layer.
+⚡  CURSOR
+ PROMPT — Paste this into Cursor AI
+Create engines/prediction_markets/clients/polymarket_client.py with 
+PolymarketClient
+:
+Base URL: 
+https://gamma-api.polymarket.com  (
+no auth)
+get_all_active_markets
+(limit=
+500) —
+ GET /
+markets?active
+=
+true&order
+=volume24hr&ascending=false
+  Pull up to 500 markets per call (paginate if needed)
+  Returns full 
+dict
+: {
+id, question, 
+outcomePrices
+, volume24hr, liquidity, 
+endDate
+,
+                      tags, category, slug}
+get_market_by_id
+(
+market_
+id
+) —
+ GET /
+markets/{
+id}
+  Full market detail for a specific market
+extract_probability
+(
+market_dict
+) -> float:
+  
+outcomePrices
+ 
+is
+ ['0.67', '0.33
+'] —
+ index 0 is always YES
+  Return float(
+market_dict
+['
+outcomePrices
+'][0])
+  If market has >2 outcomes (multi-outcome): return None, log and skip
+Cache rules:
+  Write every successful response to data/
+polymarket_cache.json
+ with:
+  
+{ 
+fetched
+_at
+: ISO timestamp, markets: 
+[...] }
+  On API failure: load cache only if age < 4 hours (use 
+Path.stat
+().
+st_mtime
+)
+  If cache > 4 hours old: return [] and 
+log.critical
+('
+Polymarket
+ cache too stale')
+  Never silently use stale data in live scoring
+Rate limit: 1000 calls/hour. 
+time.sleep
+(0.05) between paginated calls.
+STEP
+4
+Kalshi Client — Both Subdomains
+Target: Day 2
+⚡  CURSOR
+ PROMPT — Paste this into Cursor AI
+Create engines/prediction_markets/clients/kalshi_client.py with 
+KalshiClient
+:
+Base URLs (try in order):
+  PRIMARY:  https://trading.kalshi.com/trade-api/v2   # general macro
+  FALLBACK: https://api.elections.kalshi.com/trade-api/v2
+get_all_
+markets
+(
+limit=200, status='open'):
+  GET /
+markets?limit
+=200&status=open
+  Returns: ticker, title, 
+yes_bid
+, 
+yes_ask
+, volume, 
+close_time
+, category
+normalize_market
+(raw) -> 
+dict
+:
+  
+yes_mid
+ = (
+yes_bid
+ + 
+yes_ask
+) / 2
+  spread = 
+yes_ask
+ - 
+yes_bid
+  
+low_confidence
+ = spread > 0.10
+  Return normalized 
+dict
+ with 
+yes_mid
+ as the probability field
+Cache: same rules as 
+Polymarket
+ (4-hour max age, 
+Path.stat
+().
+st_mtime
+)
+Write to data/
+kalshi_cache.json
+STEP
+5
+Market Filter & Theme Assignment
+Target: Day 2–3
+⚡  CURSOR
+ PROMPT — Paste this into Cursor AI
+Create engines/prediction_markets/filters/market_filter.py with 
+MarketFilter
+:
+THEMES and their keyword fingerprints:
+  '
+sports
+_nfl
+':  
+   [
+'
+nfl
+', 'super bowl', 'quarterback', 'touchdown', 'playoff'],
+  '
+sports
+_nba
+':  
+   [
+'
+nba
+', 'finals', '
+mvp
+', 'basketball', 'championship'],
+  '
+sports
+_mlb
+':  
+   [
+'
+mlb
+', 'world series', 'baseball', 'pitcher'],
+  '
+sports
+_soccer
+'
+:  [
+'premier league', 'champions league', 'la 
+liga
+', 'world cup', 'soccer'],
+  '
+sports
+_combat
+'
+:  [
+'
+ufc
+', 'boxing', '
+mma
+', 'fight', 'knockout'],
+  '
+sports
+_golf
+': 
+   [
+'masters', '
+pga
+', 'golf', 'open championship'],
+  '
+elections
+_us
+':
+   [
+'president', 'senate', 'congress', 'governor', 'election', 'vote'],
+  '
+elections
+_intl
+': ['prime minister', 'chancellor', 'parliament', 'referendum'],
+  '
+btc
+_price
+':   
+   [
+'bitcoin', '
+btc
+', '$100k', '$120k', 'price'],
+  '
+eth
+_events
+':  
+   [
+'
+ethereum
+', 'eth', '
+etf
+', 'staking'],
+  '
+other
+_crypto
+':
+   [
+'
+solana
+', 'sol', '
+xrp
+', 'ripple', 'altcoin', 'crypto'],
+  '
+fed
+_macro
+':   
+   [
+'fed', '
+fomc
+', 'rate cut', 'rate hike', 'interest rate', '
+powell
+'],
+  '
+cpi
+_macro
+':   
+   [
+'cpi', 'inflation', 'consumer price'],
+  'recession':   
+   [
+'recession', '
+gdp
+', 'unemployment'],
+  'geopolitics': 
+   [
+'war', '
+ukraine
+', '
+russia
+', '
+china
+', '
+taiwan
+', 'sanctions'],
+  '
+tech
+_ai
+':     
+   [
+'
+openai
+', '
+gpt
+', 'ai model', 'artificial intelligence'],
+  'entertainment'
+:  [
+'
+oscar
+', 'grammy', 'box office', 'award'],
+assign_theme
+(
+question_text
+) -> str:
+  Lowercase question, check each theme's keywords.
+  Return first matching theme. Default: 'other'.
+score_market
+(
+market_dict
+) -> float 0-1:
+  Start at 0.0
+  +0.3 if theme assigned (not 'other')
+  +0.2 if volume_24h > 10000
+  +0.2 if liquidity > 5000
+  +0.2 if 
+end_date
+ >= 3 days away
+  +0.1 if not 
+low_confidence
+  Cap at 1.0
+filter_
+markets
+(
+markets_list
+, 
+min_score
+=0.3) -> list:
+  Apply 
+score_
+market
+(
+) to each, keep >= 
+min_score
+  Sort by score descending
+  No hard cap on 
+count —
+ we want all categories covered
+STEP
+6
+Cross-Platform Deduplication
+Target: Day 3
+⚠
+️  Why
+ 
+this matters
+The same Fed rate decision appears on 
+Polymarket
+ AND Kalshi every FOMC meeting.
+Without 
+dedup
+, it scores twice in the signal — making macro bets look stronger than they are.
+This is the most common silent corruption in cross-platform prediction market systems.
+⚡  CURSOR
+ PROMPT — Paste this into Cursor AI
+Create engines/prediction_markets/filters/dedup.py with 
+MarketDeduplicator
+:
+EVENT_FINGERPRINTS — 
+dict
+ of known recurring events that appear on both platforms:
+  Each entry: 
+{ '
+keywords': [...], '
+prefer_platform
+': '
+kalshi
+'|'
+polymarket
+' }
+  Examples:
+  '
+fomc
+_rate
+': 
+{ keywords
+: ['
+fomc
+', 'fed', 'rate cut', 'rate hike'], prefer: '
+kalshi
+' }
+  '
+cpi
+_print
+': 
+{ keywords
+: ['cpi', 'consumer price', 'inflation'], prefer: '
+kalshi
+' }
+  '
+btc
+_price
+'
+:  {
+ keywords: ['bitcoin', '
+btc
+', '$100k', '$120k'], prefer: '
+polymarket
+' }
+  '
+us
+_election
+':{
+ keywords: ['president', 'senate', 'election 2024'], prefer: '
+polymarket
+' }
+  'recession'
+:  {
+ keywords: ['recession', '
+gdp
+ contraction'], prefer: '
+kalshi
+' }
+dedup
+(
+markets_list
+) -> (
+kept_list
+, 
+dropped_list
+):
+  1. Group markets by event fingerprint using keyword overlap
+     (use 
+rapidfuzz.fuzz
+.token_set_ratio
+ on question text, threshold 70)
+  2. Within each fingerprint group that has both platforms:
+     - Keep the market from the preferred platform (higher domain expertise)
+     - If preferred platform 
+not
+ present, keep highest liquidity
+     - Log every dropped duplicate with reason
+  3. Markets that match no fingerprint: keep all
+Returns 
+kept_list
+ for tracking, 
+dropped_list
+ for audit log.
+Log: 
+dedup
+ dropped N markets (list of question + platform for each)
+✅  Validation
+ Checklist — Confirm before moving on
+☐  Database
+ creates all 7 tables without error on first run
+☐  
+polymarket
+_client
+: 
+get_all_active_
+markets
+(
+) returns 50+ markets with 
+outcomePrices
+☐  
+polymarket
+_client
+: cache returns [] with CRITICAL log when file > 4 hours old
+☐  
+kalshi
+_
+client
+:
+ tries trading.kalshi.com first, falls back to elections subdomain
+☐  
+kalshi
+_client
+: 
+low_confidence
+=True set when spread > 0.10
+☐  
+market
+_filter
+: 
+assign_
+theme
+(
+) correctly 
+categorises
+ 10 test questions across 5 categories
+☐  
+market
+_filter
+: 
+score_
+market
+(
+) returns 0-1 for all test cases
+☐  
+dedup
+: drops known FOMC duplicate when both platforms present, logs the drop
+☐  
+dedup
+: keeps all markets when no fingerprint matches
+☐  Phase
+ 1 main.py: full fetch → filter → 
+dedup
+ cycle runs without error
+PHASE 2
+News Ingestion & NLP
+Detect the gap between news breaking and markets repricing
+The core edge in prediction market betting is information arbitrage — news breaks, the market hasn't repriced yet, and you have a 5–
+30 minute
+ window to act. This phase builds the engine that detects those windows automatically.
+ℹ️  How
+ the news lag works
+1. Breaking news event is published (e.g. Fed chair makes surprise comment)
+2. Your system ingests the article within 60-120 seconds of publication
+3. NLP extracts entities: 'Fed', 'interest rates', 'Powell', 'March'
+4. Entity matcher scans all open markets for keyword overlap
+5. For each matched market: 
+checks
+ if probability has moved in last 30 min
+6. If price is FLAT but news is clearly relevant → ALERT FIRED
+   The window: news is out, crowd hasn't priced it yet. This is your edge.
+STEP
+7
+News Feed Ingestion
+Target: Day 5–6
+⚡  CURSOR
+ PROMPT — Paste this into Cursor AI
+Create engines/prediction_markets/clients/newsapi_client.py with 
+NewsIngester
+:
+Source 1 — 
+NewsAPI
+ (free tier: 100 calls/day, enough for polling every 15 min):
+  NEWSAPI_KEY 
+from .env
+  GET https://newsapi.org/v2/everything?q={query}&sortBy=publishedAt&pageSize=20
+  Queries to run every 15 min:
+    '
+federal
+ reserve interest rate'
+    '
+bitcoin
+ crypto market'
+    '
+election
+ results poll'
+    'sports championship winner'
+    '
+recession
+ inflation GDP'
+  
+Returns: {
+source, title, description, 
+url
+, 
+publishedAt
+, content}
+Source 2 — RSS feeds (free, no key needed):
+  Use 
+feedparser
+ library
+  Feeds to poll every 10 min:
+    https://feeds.reuters.com/reuters/topNews
+    https://feeds.bbci.co.uk/news/rss.xml
+    https://rss.nytimes.com/services/xml/rss/nyt/HomePage.xml
+    https://www.espn.com/espn/rss/news
+    
+https://feeds.a.dj.com/rss/RSSMarketsMain.xml  (
+WSJ Markets)
+Source 3 — Reddit (free, no key needed):
+  Poll these subreddits every 30 min via JSON API (no auth for public):
+    https://www.reddit.com/r/politics/top.json?limit=10&t=hour
+    https://www.reddit.com/r/CryptoCurrency/top.json?limit=10&t=hour
+    https://www.reddit.com/r/nfl/top.json?limit=10&t=hour
+    https://www.reddit.com/r/nba/top.json?limit=10&t=hour
+store_
+article
+(
+headline, body, source, 
+url
+, 
+published_at
+):
+  Deduplicate by URL before inserting (don't store the same article twice)
+  Save to 
+NewsArticle
+ table
+  Trigger entity extraction immediately after save
+STEP
+8
+Entity Extraction & Market Matching
+Target: Day 6–7
+⚡  CURSOR
+ PROMPT — Paste this into Cursor AI
+Create engines/prediction_markets/analysis/news_impact_scorer.py with 
+NewsImpactScorer
+:
+extract_
+entities
+(
+article_text
+, headline) -> 
+dict
+:
+  Use Ollama (qwen2.5:7b) with this system prompt:
+  'You are a prediction market analyst. From the article extract ONLY concrete,
+   specific entities that would affect prediction market outcomes. Respond 
+in
+ JSON only.'
+  User prompt:
+  'Extract from this article: teams, players, politicians, countries, companies,
+   dates (month + year), specific events (e.g. Fed rate decision March),
+   numeric outcomes (e.g. BTC $100k, unemployment 4.2%).
+   
+Article: {text[
+:
+3000]}
+'
+  
+Returns: {
+    teams: [...], players: [...], politicians: [...],
+    organizations: [...], events: [...], 
+numeric_targets
+: [...],
+    dates: [...], tickers: 
+[...] }
+match_
+markets
+(
+entities, 
+all_markets
+) -> list of {market, 
+relevance_
+score
+}:
+  For each open market:
+    1. Check 
+keyword
+ 
+overlap
+ between entities and market 
+question
+       Use 
+rapidfuzz.fuzz
+.token_set_ratio
+ (threshold: 60)
+    2. Check theme alignment (sports entities -> sports markets)
+    3. Score: 0-1 based on 
+overlap
+ depth
+  Return markets with 
+relevance_score
+ > 0.4, sorted by score
+detect_news_
+lag
+(
+article_id
+, 
+matched_markets
+) -> list of alerts:
+  For each matched market:
+    Get probability from last 30 minutes of readings
+    If delta_30min < 0.02 (market hasn't moved):
+      AND article 
+published_at
+ < 45 minutes ago:
+      Create 
+alert: {
+type: '
+news_lag
+', market, article, 
+relevance_score
+,
+                     
+current_probability
+, 
+expected_direction
+}
+  Return alerts sorted by 
+relevance_score
+ descending
+expected_
+direction
+(
+article_sentiment
+, 
+market_question
+) -> '
+YES'|'NO'|'unknown
+':
+  Use qwen2.5:7b to classify whether the news makes the market outcome 
+MORE or LESS likely
+  'Given this headline, does it make this market outcome more likely (YES) or less likely (NO)?
+   
+Headline: {headline}.
+ 
+Market: {question}.
+ Reply: YES, NO, or UNKNOWN only.'
+✅  Validation
+ Checklist — Confirm before moving on
+☐  
+NewsAPI
+ client returns articles from at least 3 queries within 60 seconds
+☐  RSS
+ 
+feedparser
+ pulls from all 5 feeds without error
+☐  Reddit
+ JSON API returns top posts from all 4 subreddits
+☐  Article
+ deduplication: same URL not stored twice across multiple polls
+☐  
+extract
+_
+entities
+(
+): returns valid JSON for a sports headline and a macro headline
+☐  
+match
+_
+markets
+(
+): links a Fed rate article to at least one 
+fed_macro
+ market
+☐  
+detect
+_news_
+lag
+(
+): flags a market as lagged when price flat 30+ min after news
+☐  
+NewsArticle
+ table grows with new rows every poll cycle
+☐  
+NewsMarketLink
+ table populated with relevance scores after each article
+PHASE 3
+Statistical Baselines & Outlier Detection
+Find markets where the crowd is provably mispriced
+The second edge source is statistical arbitrage — comparing what the prediction market says against what independent models say. When they diverge significantly, one of them is wrong. Your job is to identify which one and bet accordingly.
+Market Type
+Baseline Source
+Outlier Threshold
+Sports
+The Odds API (free tier), ESPN stats
+±8% vs Vegas line
+Elections
+Wikipedia poll aggregates, FiveThirtyEight archive
+±10% vs poll model
+Fed Macro
+CME 
+FedWatch
+ tool (scrape or API)
+±5% vs futures implied
+CPI / GDP
+Bloomberg consensus estimates (public)
+±7% vs analyst consensus
+BTC Price
+Binance futures implied probability
+±10% vs derivatives market
+Recession
+Fed probability model (public data)
+±12% vs Fed model
+STEP
+9
+Statistical Baseline Fetchers
+Target: Week 3 — Day 1–2
+⚡  CURSOR
+ PROMPT — Paste this into Cursor AI
+Create engines/prediction_markets/clients/sports_client.py with 
+SportsDataClient
+:
+The Odds API (free tier — 500 requests/month, use sparingly):
+  ODDS_API_KEY 
+from .env
+  GET https://api.the-odds-api.com/v4/sports/{sport}/odds/
+     ?
+apiKey
+={key}&regions=
+us&markets
+=h2h&oddsFormat=decimal
+  Sports keys: 
+americanfootball_nfl
+, 
+basketball_nba
+, 
+baseball_mlb
+, 
+soccer_epl
+  
+convert_odds_to_probability
+(
+decimal_odds
+) -> float:
+    Raw: 1 / 
+decimal_odds
+    
+Vig
+-removed (more accurate): divide each by sum of both implied probs
+  
+get_game_
+odds
+(
+sport, 
+team_a
+, 
+team_b
+) -> {
+team_a_prob
+, 
+team_b_prob
+}
+    Match to prediction market by team name fuzzy match (
+rapidfuzz
+, threshold 80)
+Create engines/prediction_markets/clients/macro_client.py with 
+MacroBaselineClient
+:
+  CME 
+FedWatch
+ — scrape the public page or use FRED API (free):
+    FRED API: https://fred.stlouisfed.org/graph/fredgraph.csv?id=FEDFUNDS
+    FRED_API_KEY 
+from .env
+ (free to register)
+    
+get_fed_cut_
+probability
+(
+) -> float (probability market prices in a cut)
+  Polling aggregates for elections — scrape Wikipedia or 270toWin public data:
+    
+get_election_poll_average
+(
+candidate_or_party
+) -> float probability
+  All baseline values saved to 
+StatisticalBaseline
+ table with source + timestamp
+STEP
+10
+Outlier Detector
+Target: Week 3 — Day 3
+⚡  CURSOR
+ PROMPT — Paste this into Cursor AI
+Create engines/prediction_markets/analysis/outlier_detector.py with 
+OutlierDetector
+:
+find_
+outliers
+(
+markets, baselines) -> list of 
+OutlierAlert
+:
+  For each market that has a matching 
+StatisticalBaseline
+ entry:
+    divergence = 
+abs(
+market_probability
+ - 
+baseline_probability
+)
+    If divergence >= 
+theme_threshold
+ (see table above):
+      direction = '
+market_too_high
+' if 
+market_prob
+ > 
+baseline_prob
+ else '
+market_too_low
+'
+      
+expected_bet
+ = 'NO' if 
+market_too_high
+ else 'YES'
+      
+ev_estimate
+ = 
+calculate_
+ev
+(
+market_probability
+, 
+baseline_probability
+)
+      Create 
+OutlierAlert
+: {
+market, 
+baseline_source
+, 
+market_prob
+, 
+baseline_prob
+,
+                             divergence, direction, 
+expected_bet
+, 
+ev_estimate
+,
+                             theme, confidence}
+calculate_
+ev
+(
+market_prob
+, 
+baseline_prob
+) -> float:
+  Uses 
+baseline_prob
+ as the 'true' probability
+  If betting YES: EV = (
+baseline_prob
+ * (1/
+market_prob
+ - 1)) - (1 - 
+baseline_prob
+)
+  If betting NO
+:  EV
+ 
+= ((
+1-baseline_prob) * (1/(1-market_prob) - 1)) - 
+baseline_prob
+  Return EV as a percentage (e.g. 0.12 = 12% edge)
+Thresholds by theme:
+  sports_*:    
+0.08  (
+8% divergence triggers alert)
+  elections_*: 0.10
+  
+fed_macro
+:   0.05
+  
+cpi_macro
+:   0.07
+  
+btc_price
+:   0.10
+  recession:   0.12
+  other:       
+0.15  (
+require larger divergence for less-modelled markets)
+Only return outliers where 
+ev_estimate
+ > 0.05 (at least 5% edge after 
+vig
+ estimate)
+✅  Validation
+ Checklist — Confirm before moving on
+☐  The
+ Odds API returns game odds for at least 2 NFL games
+☐  
+convert
+_odds_to_
+probability
+(
+): 
+vig
+-removal tested against known game
+☐  CME
+ 
+FedWatch
+ or FRED API returns a fed probability estimate
+☐  
+StatisticalBaseline
+ table: at least one entry per theme after first run
+☐  
+outlier
+_
+detector
+:
+ correctly flags a test case with 15% divergence as outlier
+☐  
+calculate
+_
+ev
+(
+): returns positive EV for underpriced YES, negative for overpriced YES
+☐  No
+ false positives: markets within threshold not flagged
+PHASE 4
+Paper Betting System & Performance Tracking
+Build the record that tells you where your edge 
+actually is
+Paper betting is not optional. You will not know which signal types have real edge until you have 3+ months of logged paper bets with actual outcomes. The data will surprise you — some signals you expect to work won't, and some you underestimate will dominate.
+🔴  Hard
+ rule before any live capital
+Do not place a single real-money bet until you have 
+ALL of
+ the following:
+  - 90+ days of paper bets logged
+  - 50+ resolved bets (markets that have settled) per category
+  - Positive EV demonstrated across at least 2 signal types
+  - Win rate >= 54% on sports markets (covers the 
+vig
+ at typical 
+Polymarket
+ spreads)
+  - Maximum drawdown on paper never exceeded 20 units in a single week
+STEP
+11
+Paper Betting Engine
+Target: Week 4 — Day 1–2
+⚡  CURSOR
+ PROMPT — Paste this into Cursor AI
+Create engines/prediction_markets/betting/paper_bettor.py with 
+PaperBettor
+:
+place_paper_
+bet
+(
+market_id
+, direction, 
+trigger_type
+, 
+trigger_detail
+, stake=1.0):
+  1. Fetch current market probability from latest 
+ProbabilityReading
+  2. Calculate 
+implied_odds
+: 1 / probability (for YES) or 1 / (1 - probability) (for NO)
+  3. Insert 
+PaperBet
+ record with outcome='PENDING'
+  4. Return 
+bet_id
+check_
+resolutions
+(
+):
+  Called every poll cycle
+  For each PENDING bet where market 
+end_date
+ has passed:
+    Fetch final market probability from 
+Polymarket
+/Kalshi API
+    If 
+final_prob
+ >= 0.95: market resolved YES
+    If 
+final_prob
+ <= 0.05: market resolved NO
+    Else: outcome = 'VOID' (unresolved, exclude from stats)
+    Calculate 
+pnl_units
+: if bet wins, 
+pnl
+ = stake * (
+implied_odds
+ - 1)
+                          
+if
+ bet loses, 
+pnl
+ = -stake
+    Update 
+PaperBet
+ record with outcome + 
+pnl_units
+ + 
+resolved_at
+get_
+stats
+(
+category=None, 
+signal_type
+=None, days=90) -> 
+dict
+:
+  Filter resolved bets by category/
+signal_type
+/date range
+  Returns:
+    
+total_bets
+, 
+win_rate
+, 
+total_pnl_units
+, 
+avg_ev_at_bet
+,
+    
+roi_percent
+, 
+max_drawdown_units
+, 
+best_category
+, 
+best_signal_type
+,
+    
+avg_odds_bet
+, 
+avg_odds_won
+  This is your performance ledger. Review weekly.
+STEP
+12
+Opportunity Ranker
+Target: Week 4 — Day 2–3
+⚡  CURSOR
+ PROMPT — Paste this into Cursor AI
+Create engines/prediction_markets/betting/opportunity_ranker.py with 
+OpportunityRanker
+:
+rank_
+opportunities
+(
+outlier_alerts
+, 
+news_lag_alerts
+, 
+velocity_alerts
+) -> list:
+  Combines all alert types into a unified opportunity queue
+  Each opportunity gets a composite score:
+  score = (
+ev_estimate
+ * 
+0.40)           #
+ EV is most important
+        + (
+confidence_score
+ * 
+0.25)       #
+ how confident is the signal
+        + (
+liquidity_score
+ * 
+0.20)        #
+ can we 
+actually get
+ filled
+        + (
+time_sensitivity_score
+ * 
+0.15) #
+ news lag decays fast
+  
+liquidity_score
+: normalize market liquidity 0-1 (log scale, $10k = 0.5, $100k = 1.0)
+  
+time_sensitivity_score
+: for 
+news_lag
+ alerts, decays linearly from 1.0 at 0 min
+                           to 0.0 at 60 min. Other alerts: 0.5 flat.
+  Returns list sorted by score, each entry:
+  
+{ rank
+, 
+market_id
+, question, category, 
+signal_type
+, 
+expected_bet
+,
+    
+ev_estimate
+, score, 
+time_sensitive
+, 
+expires_at
+, 
+detail }
+  Cap at 10 opportunities per cycle — focus beats scatter
+Auto-paper-bet rule (configurable 
+in .env
+ as AUTO_PAPER_BET=true):
+  If score > 0.7 AND 
+ev_estimate
+ > 0.08: automatically place paper bet
+  If score <= 0.7: add to queue for manual review only
+  Never auto-paper-bet on opportunities where confidence = 'low'
+Scoring Engine: Signal × Execution × Trust
+The flat weighted score works for v1, but a three-part architecture lets the system learn things the flat version cannot: that news lag works great in macro but poorly in entertainment, or that outlier detection 
+works in sports
+ only within certain liquidity bands. Split scoring into three independent dimensions.
+⚡  CURSOR
+ PROMPT — Paste this into Cursor AI
+Refactor engines/
+prediction_markets
+/betting/opportunity_ranker.py:
+Replace the single composite score with three component scores:
+1. 
+signal_
+score
+  —
+ how strong is the raw edge?
+   
+ev_estimate
+ * 0.50
+   + 
+divergence_from_baseline
+ * 0.30
+   (
+outlier signals only)
+   + 
+relevance_score
+ * 0.20         
+   (
+news lag signals only)
+   + abs(velocity) * 0.20           
+   (
+velocity signals only)
+   Capped 0.0–1.0
+2. 
+execution_
+score
+  —
+ can we 
+actually capture
+ it?
+   
+liquidity_score
+ (log-
+normalised
+, $10k=0.5, $100k=1.0
+)  *
+ 0.40
+   + 
+spread_score
+ (1.0 - 
+normalised_spread
+, 0=wide, 1=tight) * 0.30
+   + 
+staleness_penalty
+ (1.0 if reading <5min, decays to 0 at 30
+min)  *
+ 0.20
+   + 
+market_age_score
+ (
+penalise
+ markets <24h old: thin 
+liquidity)   
+  * 0.10
+   Capped 0.0–1.0
+3. 
+trust_
+score
+  —
+ what is this strategy's track record here?
+   Load 
+StrategyPerformanceSnapshot
+ for (
+strategy_version_id
+, category, 
+signal_type
+)
+   If < 10 resolved bets in this slice: 
+trust_score
+ = 
+0.40  (
+neutral prior)
+   Else:
+     
+roi_component
+    = 
+normalise
+(
+roi_percent
+, floor=-0.20, ceil=0.30)
+     
+win_rate_component
+ = 
+normalise
+(
+win_rate
+, floor=0.40, ceil=0.70)
+     
+calibration_component
+ = 1.0 - 
+calibration_error
+     
+trust_score
+ = 
+roi_component
+*0.50 + 
+win_rate_component
+*0.30
+                   + 
+calibration_component
+*0.20
+   Capped 0.0–1.0
+final_score
+ = 
+signal_score
+ * 0.45
+            + 
+execution_score
+ * 0.30
+            + 
+trust_score
+ * 0.25
+Store all three component scores in the opportunity 
+dict
+ alongside 
+final_score
+.
+Log them to 
+SignalEvent
+ so the agent can later 
+analyse
+ which component
+predicted outcomes best.
+Update /pm/opportunities dashboard endpoint to show all three components.
+Update auto-paper-bet rule: require 
+final_score
+ > 0.7 AND 
+trust_score
+ > 0.35
+(no auto-betting in signal/category slices with no track record).
+STEP
+13
+Performance Dashboard (
+FastAPI
+)
+Target: Week 4 — Day 4
+⚡  CURSOR
+ PROMPT — Paste this into Cursor AI
+Add to shared/dashboard/app.py — new routes for prediction markets:
+GET /pm/overview
+  Total paper bets, win rate overall, best category, best signal type, total 
+PnL
+GET /pm/opportunities
+  Current ranked opportunity queue (top 10, with scores and EV estimates)
+GET /pm/
+bets?category
+=
+sports&days
+=30
+  Resolved paper bets with filters. Win/loss color coded.
+GET /pm/
+markets?theme
+=
+sports_nfl
+  All tracked markets in a theme with current probability + 24h delta
+GET /pm/news
+  Last 20 news articles with matched markets and lag detection results
+GET /pm/health
+  
+markets_tracked
+, 
+ok_markets
+, 
+stale_markets
+, 
+last_poll_time
+, 
+is_ready
+,
+  
+news_articles_today
+, 
+open_paper_bets
+, alerts_last_24h
+✅  Validation
+ Checklist — Confirm before moving on
+☐  
+PaperBet
+ table: 
+place_paper_
+bet
+(
+) inserts correctly and returns 
+bet_id
+☐  
+check
+_
+resolutions
+(
+): correctly resolves a test bet against a settled market
+☐  
+get
+_
+stats
+(
+): returns correct 
+win_rate
+ for a set of 10 test bets
+☐  
+rank
+_
+opportunities
+(
+): combines 3 alert types, returns top 10 sorted by score
+☐  Auto
+-paper-bet: fires on score > 0.7 test case, skips on score 0.5 test case
+☐  Dashboard
+ /pm/overview: loads and shows correct summary stats
+☐  Dashboard
+ /pm/
+opportunities:
+ shows current opportunity queue
+☐  First
+ 5 real paper bets placed and logged from live signals
+PHASE 5
+Velocity, Arbitrage & Correlation Scanners
+Find edge from market movement patterns and mathematical inconsistencies
+STEP
+14
+Velocity Scanner
+Target: Week 5 — Day 1–2
+Probability
+ velocity is how fast a market is moving, not where it currently sits. A market at 40% falling 8% in 2 hours is a much stronger signal than a market at 40% that's been flat for a week. This scanner detects and classifies momentum.
+⚡  CURSOR
+ PROMPT — Paste this into Cursor AI
+Create engines/prediction_markets/analysis/velocity_scanner.py with 
+VelocityScanner
+:
+get_
+velocity
+(
+market_id
+, 
+window_hours
+=2) -> 
+dict
+:
+  Load all ok-quality readings from last 
+window_hours
+  delta = 
+latest_probability
+ - 
+probability_window_hours_ago
+  velocity = delta / 
+window_
+hours
+  (
+probability points per hour)
+  acceleration = 
+velocity_now
+ - 
+velocity_prev_window
+ (is it speeding up?)
+  Return: 
+{ delta
+, velocity, acceleration, 
+reading_count
+, quality: '
+ok'|'stale
+' }
+find_
+movers
+(
+min_velocity
+=0.04, 
+min_liquidity
+=5000) -> list:
+  Scan all tracked markets
+  Return markets where abs(velocity) >= 
+min_velocity
+  Classify each:
+    velocity > 0.06/
+hr
+:  '
+strong_bullish_move
+'
+    velocity > 0.04/
+hr
+:  '
+mild_bullish_move
+'
+    velocity < -0.06/
+hr
+: '
+strong_bearish_move
+'
+    velocity < -0.04/
+hr
+: '
+mild_bearish_move
+'
+  Include acceleration — if market is accelerating, flag as '
+momentum_increasing
+'
+detect_velocity_opportunities
+(movers) -> list of 
+VelocityAlert
+:
+  For each strong mover:
+    If 
+news_lag
+ 
+not
+ detected (no recent linked article): velocity may be insider/sharp
+    If 
+news_lag
+ IS detected: velocity is news-driven (combine with 
+news_lag
+ alert)
+    Generate alert with 
+ev_estimate
+ based on continuation probability
+      (
+historical
+: strong movers continue direction 62% of the time at 2hr mark)
+STEP
+15
+Arbitrage Scanner
+Target: Week 5 — Day 3–4
+⚡  CURSOR
+ PROMPT — Paste this into Cursor AI
+Create engines/prediction_markets/analysis/arbitrage_scanner.py with 
+ArbitrageScanner
+:
+TYPE 1 — Cross-platform price arbitrage:
+  
+find_cross_platform_
+arb
+(
+polymarket_markets
+, 
+kalshi_markets
+) -> list:
+    Use 
+dedup
+ fingerprints to identify same-event markets on both platforms
+    For each matched pair:
+      
+pm_prob
+ = 
+polymarket
+ YES price
+      
+kl_prob
+ = 
+kalshi
+ 
+yes_mid
+      spread = 
+abs(
+pm_prob
+ - 
+kl_prob
+)
+      If spread > 0.05: flag as arb opportunity
+      Note: 
+Polymarket
+ is USDC, Kalshi is USD. Execution requires accounts on both.
+      Log opportunity — do NOT auto-paper-bet arbitrage (execution is manual currently)
+TYPE 2 — Correlated market inconsistency:
+  
+find_correlated_arb
+(markets) -> list:
+    Known correlation groups (define as config):
+      '
+nfl
+_championship
+': ['
+team_a_wins_superbowl
+', '
+team_a_wins_conference
+', '
+player_x_mvp
+']
+      'election': ['
+candidate_wins_presidency
+', '
+candidate_wins_state_X
+', '
+party_wins_senate
+']
+      '
+btc
+': ['btc_hits_100k', 'btc_hits_120k', 'btc_hits_80k_by_eoy']
+    For each group: check if probabilities are mathematically consistent
+      e.g. 
+P(
+team wins Super Bowl) cannot be > 
+P(
+team wins Conference)
+      e.g. P(A) + P(B) + P(C) cannot sum to > 1.0 for mutually exclusive outcomes
+      e.g. 
+P(
+BTC hits $120k) cannot be > 
+P(
+BTC hits $100k)
+    Inconsistency score = how far from mathematically valid
+    If inconsistency > 0.06: create ArbitrageAlert with which market to bet
+TYPE 3 — Implied probability chains:
+  'If team A has 65% to win Super Bowl, what should the MVP market price be?'
+  Use conditional probability to estimate fair value of derivative markets
+  Flag derivative markets priced far from their implied conditional value
+✅  Validation
+ Checklist — Confirm before moving on
+☐  
+velocity
+_scanner
+: 
+get_
+velocity
+(
+) returns correct delta for a test market with known readings
+☐  
+velocity
+_scanner
+: 
+find_
+movers
+(
+) returns markets above threshold, excludes stale-quality
+☐  
+velocity
+_
+scanner
+:
+ correctly classifies strong vs mild movers
+☐  
+arbitrage
+_scanner
+: 
+detect_cross_platform_
+arb
+(
+) finds the test FOMC pair
+☐  
+arbitrage
+_scanner
+: correlated arb correctly flags BTC $120k > $100k scenario as invalid
+☐  
+arbitrage
+_scanner
+: mathematically correct inconsistency detection for 3-way exclusive market
+☐  All
+ scanner alerts feed into 
+OpportunityRanker
+ correctly
+PHASE 6
+OpenClaw
+ Skills & Telegram Alerts
+Control and query everything from your phone
+STEP
+16
+Alert Service
+Target: Week 6 — Day 1
+⚡  CURSOR
+ PROMPT — Paste this into Cursor AI
+Create engines/prediction_markets/alerts/alert_service.py with 
+PMAlertService
+:
+send_opportunity_alert
+(opportunity):
+  Telegram message format:
+  '🎯 PM OPPORTUNITY [rank #N]
+   
+Market: {question[
+:
+80]}
+   
+Platform: {
+platform} | Category: {category}
+   
+Signal: {
+signal_type
+} | Bet: {
+expected_bet
+}
+   Current 
+odds: {
+probability:.0%} | EV estimate: +{ev:.
+0%}
+   
+Score: {
+score
+:.2
+f} | Time 
+sensitive: {
+yes/no}
+   Reply YES to paper bet this | Reply INFO for detail'
+send_news_lag_alert
+(
+news_lag
+):
+  '📰 NEWS LAG DETECTED
+   
+News: {headline[
+:
+100]}
+   Market 
+affected: {question[
+:
+80]}
+   Current price: {probability:.0%} | Unchanged for: {minutes} min
+   Expected 
+direction: {
+YES/NO}
+   Window closing — act within 20 minutes'
+send_daily_
+digest
+(
+):
+  Sent at 8am daily via Telegram
+  '📊 PM Daily Summary — {date}
+   Markets tracked: N | Paper bets open: N
+   Opportunities yesterday: N | Auto-bet: N
+   Paper P&L (30 days): +X units | Win rate: X%
+   Top 
+mover: {question} ({delta:+.0%}
+ in 24h)
+   Best 
+category: {category} ({
+win_
+rate
+}%
+)'
+Rate 
+limiting:
+ max 1 alert per market per 2 hours
+Max 10 alerts per day total to avoid noise
+STEP
+17
+OpenClaw
+ Skills
+Target: Week 6 — Day 2–3
+⚡  CURSOR
+ PROMPT — Paste this into Cursor AI
+Create 4 skill files 
+in .
+openclaw
+/skills/:
+── SKILL 1: 
+pm-opportunities
+ ──────────────────────────────────────
+Triggers: 'any good bets?', 'prediction market opportunities',
+          '
+what
+ should I bet?', 'any mispriced markets?'
+Actions:
+  1. Read current opportunity queue from 
+OpportunityRanker
+  2. Return top 3 with: market, signal type, EV, score, time sensitivity
+  3. If no opportunities score > 0.5: 'No high-confidence opportunities right now'
+── SKILL 2: 
+pm-research
+ ───────────────────────────────────────────
+Triggers: 'what does the market say about [topic]?',
+          '
+show
+ me [election/game/event] odds',
+          '
+crowd
+ consensus on [topic]'
+Actions:
+  1. Fuzzy match input to tracked markets
+  2. Return: current probability, 24h delta, baseline comparison if available
+  3. Note whether a news lag alert is active for that market
+── SKILL 3: 
+pm-performance
+ ────────────────────────────────────────
+Triggers: '
+how
+ are my paper 
+bets
+ doing?', 'prediction market results',
+          '
+best
+ category', 'win rate'
+Actions:
+  Read 
+PaperBet
+ stats from DB, return:
+  Total bets, win rate, 
+PnL
+ (units), best category, best signal type
+  Worst category (what NOT to bet on)
+── SKILL 4: 
+pm-news
+ ───────────────────────────────────────────────
+Triggers: 'any news affecting markets?', 'news lag alerts today',
+          '
+breaking
+ news + markets'
+Actions:
+  1. Read last 10 
+NewsMarketLink
+ entries with 
+relevance_score
+ > 0.5
+  2. Return news headline, affected market, current lag status
+  3. Flag any active lag windows still within 45 minutes
+── SKILL 5: 
+pm-health
+ ──────────────────────────────────────────────
+Triggers: 'system health', 'is everything running?', 'pipeline status',
+          '
+any
+ errors?', 'check health'
+Actions:
+  1. Call 
+health_monitor.run_health_
+check
+(
+)
+  2. If ok=True: report green with key metrics (fetch ages, signals today)
+  3. If ok=False: list issues in priority order with suggested fix actions
+  4. Report 
+active_challengers_count
+ and 
+last_approved_change_at
+  5. If any metric >2x normal: flag as anomaly requiring human review
+── SKILL 6: pm-strategy-review ─────────────────────────────────────
+Triggers: 'review strategy', 'how is the strategy performing?',
+          '
+signal
+ breakdown', 'calibration report', 'feature importance'
+Actions:
+  1. Load champion 
+StrategyVersion
+ + latest 
+StrategyPerformanceSnapshot
+  2. Show: win_rate_7d / 30d / 90d trend (improving or degrading?)
+  3. Run 
+signal_
+analyzer.feature
+_
+importance
+(
+) for each signal type
+  4. Run 
+signal_
+analyzer.calibration
+_
+report
+(
+)
+  5. Flag: any signal type with 
+false_positive_rate
+ > 0.40
+  6. Suggest: if a feature shows high importance — propose a challenger
+     that adjusts its weight (must go through champion/challenger workflow)
+── SKILL 7: 
+pm-challengers
+ ─────────────────────────────────────────
+Triggers: 'show challengers', 'what experiments are running?',
+          '
+active
+ challengers', 'challenger status'
+Actions:
+  1. List all 
+StrategyVersions
+ with status='challenger'
+  2. For each: show what single parameter was changed vs champion
+  3. Show resolved bets count and current ROI vs champion ROI
+  4. Flag: challengers with enough data to evaluate (>= 30 resolved bets)
+  5. Flag: challengers that have been running >21 days with no result
+     (suggest retiring them)
+── SKILL 8: pm-promote-strategy ────────────────────────────────────
+Triggers: 'promote challenger', 'promote version X',
+          '
+make
+ challenger the new champion'
+Actions:
+  1. Load challenger + run 
+champion_
+challenger.evaluate
+()
+  2. If not promotable: report which gates failed and by how much
+  3. If 
+promotable
+: show full comparison (ROI, drawdown, calibration)
+     and ask for explicit YES confirmation before proceeding
+  4. On confirmed YES: call 
+strategy_
+registry.promote
+()
+     Log 
+PromotionDecision
+ record with full gate results
+  5. Send confirmation: 'Champion updated. Previous champion 
+archived
+.
+     Rollback available via pm-rollback-strategy.'
+  NOTE: This skill CANNOT auto-promote. Human YES 
+reply is
+ required.
+── SKILL 9: pm-rollback-strategy ───────────────────────────────────
+Triggers: 'rollback', 'revert strategy', 'undo promotion',
+          '
+restore
+ previous version'
+Actions:
+  1. Show current champion and most recent retired version (the rollback target)
+  2. Show 
+PromotionDecision
+ record for when the promotion happened
+  3. Require explicit YES confirmation
+  4. On YES: call 
+strategy_
+registry.rollback
+()
+     Log 
+PromotionDecision
+ with decision='
+rolled_back
+'
+  5. Send confirmation with before/after version numbers
+  NOTE: Same human-gate requirement as pm-promote-strategy.
+✅  Validation
+ Checklist — Confirm before moving on
+☐  Telegram
+ alert fires for a test opportunity with score > 0.7
+☐  News
+ lag Telegram alert fires and includes correct market and time window
+☐  Daily
+ digest sent at 8am with correct stats
+☐  Rate
+ limiter: same market does not alert twice within 2 hours
+☐  pm
+-opportunities 
+skill:
+ returns correct top 3 from live queue
+☐  pm
+-research 
+skill:
+ finds a market by partial question text
+☐  pm
+-performance 
+skill:
+ returns correct win rate from DB
+☐  pm
+-news skill: links recent news to affected markets
+☐  All
+ 4 skills load in 
+OpenClaw
+ and respond to example triggers
+PHASE 6.5
+Strategy Governance & Learning Loop
+Build the framework that lets 
+OpenClaw
+ improve safely
+Before giving 
+OpenClaw
+ the ability to improve the system, you need a governance layer that constrains how it improves. Without this, the agent edits config directly, creates untracked versions, and has no disciplined path from “experimental idea” to “live champion.” This phase builds that framework. It is the difference between agentic ops and letting the bot touch everything.
+STEP
+19
+Strategy Registry
+Target: Week 7 — Day 1–2
+The strategy registry is the single source of truth for which strategy is live, which is experimental, and what 
+changed
+ between versions. 
+OpenClaw
+ uses this to manage the 
+improvement
+ 
+lifecycle
+ without touching code directly.
+⚡  CURSOR
+ PROMPT — Paste this into Cursor AI
+Add to engines/
+prediction_markets
+/storage/models.py:
+Create 
+StrategyVersion
+ table (schema in Step 2 DB section).
+Create 
+StrategyPerformanceSnapshot
+ table.
+Create engines/prediction_markets/governance/strategy_registry.py
+with 
+StrategyRegistry
+:
+get_champion
+(
+strategy_name
+) -> 
+StrategyVersion
+:
+   Return the current version with status='champion' for that strategy.
+get_challengers
+(
+strategy_name
+) -> 
+list[
+StrategyVersion
+]:
+   Return all versions with status='challenger'.
+create_
+challenger
+(
+strategy_name
+, 
+base_version_id
+, 
+changes_dict
+,
+                  
+created_by
+='
+openclaw
+') -> 
+StrategyVersion
+:
+   Clone champion params, apply 
+changes_dict
+ (max 1 key changed),
+   set status='challenger'. Reject if 
+changes_dict
+ has > 1 top-level key.
+promote(
+challenger_id
+) -> 
+StrategyVersion
+:
+   Validate promotion rules before promoting (see champion/challenger rules).
+   Set old champion status='retired'. Set challenger status='champion'.
+   Log the promotion event with timestamp + reason.
+rollback(
+strategy_name
+) -> 
+StrategyVersion
+:
+   Find most recent retired version. Promote back to champion.
+   Demote current champion to 'retired'. Log rollback event.
+snapshot_
+performance
+(
+strategy_version_id
+, 
+as_of_date
+) -> 
+StrategyPerformanceSnapshot
+:
+   Read resolved 
+PaperBet
+ rows for this version.
+   Compute: 
+bets_count
+, 
+win_rate
+, 
+pnl_units
+, 
+roi_percent
+, 
+max_drawdown
+,
+   
+avg_ev
+, 
+calibration_error
+, 
+resolution_lag_hours
+.
+   Save to 
+StrategyPerformanceSnapshot
+.
+compare(
+champion_id
+, 
+challenger_id
+) -> 
+dict
+:
+   Return side-by-side snapshot comparison.
+   Include: 
+roi_delta
+, 
+win_rate_delta
+, 
+drawdown_delta
+, 
+is_promotable
+ (bool).
+STEP
+20
+Champion/Challenger Evaluator
+Target: Week 7 — Day 3–4
+The champion is the currently approved live-paper strategy. A challenger is a new version created by 
+OpenClaw
+ that differs by exactly one controlled change. Promotion only happens if the challenger wins over a minimum sample size with no degraded risk metrics.
+⚡  CURSOR
+ PROMPT — Paste this into Cursor AI
+Create engines/prediction_markets/governance/champion_challenger.py
+with 
+ChampionChallengerEvaluator
+:
+PROMOTION_RULES = {
+    '
+min
+_resolved_bets
+': 
+30,   
+      # challenger needs 30+ resolved bets
+    '
+min
+_roi_improvement
+': 
+0.02,     #
+ challenger ROI must beat champion by 2%+
+    '
+max
+_drawdown_increase
+': 
+0.05,   #
+ drawdown cannot worsen by more than 5%
+    '
+max
+_calibration_degradation
+': 0.03,
+    '
+require
+_zero_health_issues
+': True
+}
+ALLOWED_CHALLENGER_CHANGES = [
+    '
+ev
+_threshold
+',
+    '
+confidence
+_weight
+',
+    '
+velocity
+_min_threshold
+',
+    '
+signal
+_decay_minutes
+',
+    '
+theme
+_filter_list
+',
+    '
+baseline
+_source_priority
+',
+    '
+risk
+_cap_multiplier
+',
+]
+evaluate(
+challenger_id
+) -> 
+EvaluationResult
+:
+   Load champion + challenger snapshots.
+   Check each PROMOTION_RULES gate.
+   Return: 
+is_promotable
+, 
+gates_passed
+, 
+gates_failed
+, recommendation.
+run_paper_
+race
+(
+challenger_id
+, 
+duration_days
+=14):
+   Activate challenger alongside champion in paper mode.
+   Both strategies fire alerts in parallel.
+   Bets are tagged with 
+strategy_version_id
+ in 
+PaperBet
+.
+   After duration: auto-call 
+evaluate(
+).
+   If promotable: send Telegram alert with comparison for human approval.
+   Never auto-promote without human confirmation gate.
+reject(
+challenger_id
+, reason: str):
+   Set status='retired'. Log rejection reason.
+   Send summary to Telegram: what was tried and why it failed.
+STEP
+21
+Signal Event Store — The Learning Layer
+Target: Week 7 — Day 5
+Every time a signal fires, write a training row. This turns your system from an alert engine into a learning engine. Later you can train a model on signal quality. Right 
+now
+ it gives 
+OpenClaw
+ something concrete to 
+analyse
+:
+ what features 
+actually predicted
+ wins.
+⚡  CURSOR
+ PROMPT — Paste this into Cursor AI
+Update all signal-generating modules to write to 
+SignalEvent
+ on fire:
+In analysis/news_impact_scorer.py — 
+detect_news_
+lag
+(
+):
+   On each lag alert: insert 
+SignalEvent
+ with 
+signal_type
+='
+news_lag
+',
+   
+snapshot_probability
+, 
+relevance_score
+, 
+recent_news_count
+, 
+expected_direction
+.
+In analysis/outlier_detector.py — 
+find_
+outliers
+(
+):
+   On each outlier: insert 
+SignalEvent
+ with 
+signal_type
+='outlier',
+   
+baseline_probability
+, divergence, 
+ev_estimate
+, theme.
+In analysis/velocity_scanner.py — 
+detect_velocity_
+opportunities
+(
+):
+   On each velocity alert: insert 
+SignalEvent
+ with 
+signal_type
+='velocity',
+   velocity, acceleration, volume_24h, liquidity.
+In analysis/arbitrage_scanner.py:
+   On each arb alert: insert 
+SignalEvent
+ with 
+signal_type
+='arbitrage'.
+Add resolution hook in betting/paper_bettor.py — 
+check_
+resolutions
+(
+):
+   When a 
+PaperBet
+ resolves, find the linked 
+SignalEvent
+ and update:
+   
+final_outcome
+, 
+final_pnl
+, 
+label_resolved_at
+.
+Create engines/prediction_markets/governance/signal_analyzer.py
+with 
+SignalAnalyzer
+:
+feature_
+importance
+(
+signal_type
+, days=90) -> 
+dict
+:
+   For resolved 
+SignalEvents
+ of that type:
+   Compute correlation between each feature and 
+final_outcome
+.
+   
+Return
+ ranked feature list with correlation coefficients.
+false_positive_
+rate
+(
+signal_type
+, threshold=0.7) -> float:
+   Signals with 
+ev_estimate
+ > threshold that resulted in LOSS.
+calibration_
+report
+(
+) -> 
+dict
+:
+   For each 
+signal_type
+: compare 
+ev_estimate
+ distribution to actual outcomes.
+   
+Report
+ whether the engine is over- or under-confident.
+STEP
+22
+Agent Permissions & Guardrails
+Target: Week 8 — Day 1–2
+Phase 7 already has strong live-execution safety rules. Apply the same discipline to 
+OpenClaw
+ itself. The agent needs a formal permission model — not just trust and hope.
+🔒  
+OpenClaw
+ Permission Model
+ALLOWED WITHOUT HUMAN APPROVAL:
+  • Restart failed ingestion jobs
+  • Clear stale cache, rerun ingestion, regenerate features
+  • Retrain sandbox model (status='sandbox' only)
+  • Create challenger strategy (clone + one change only)
+  • Send summary reports and daily digests
+  • Change non-critical alert wording
+ALLOWED WITH HUMAN APPROVAL (Telegram confirmation required):
+  • Change scoring weights or paper-bet thresholds
+  • Promote challenger to champion
+  • Enable a new market category
+  • Change polling frequency materially (>2x change)
+NEVER ALLOWED AUTOMATICALLY — HARD BLOCKS:
+  • Remove or lower hard risk limits
+  • Enable live execution
+  • Modify bankroll rules
+  • Disable logging
+  • Delete historical performance data
+  • Push any change to a 'champion' or '
+paper_active
+' strategy
+    without going through champion/challenger promotion workflow
+⚡  CURSOR
+ PROMPT — Paste this into Cursor AI
+Create engines/prediction_markets/governance/agent_permissions.py
+with 
+AgentPermissions
+:
+PERMISSION_LEVELS = {
+    'auto': [
+        '
+restart
+_ingestion
+', '
+clear_cache
+', '
+regenerate_features
+',
+        '
+retrain
+_sandbox
+', '
+create_challenger
+', '
+send_report
+',
+        '
+update
+_alert_wording
+',
+    ],
+    '
+requires
+_human
+': [
+        '
+change
+_scoring_weights
+', '
+change_bet_thresholds
+',
+        '
+promote
+_challenger
+', '
+enable_market_category
+',
+        '
+change
+_poll_frequency
+',
+    ],
+    'never': [
+        '
+remove
+_risk_limits
+', '
+enable_live_execution
+',
+        '
+modify
+_bankroll_rules
+', '
+disable_logging
+',
+        '
+delete
+_performance_data
+', '
+direct_champion_edit
+',
+    ],
+}
+can_
+execute
+(
+action: str) -> bool:
+   If action in 'auto': return True.
+   If action in '
+requires_human
+': 
+request_human_approval
+(action), return False.
+   If action in 'never': log CRITICAL, raise 
+PermissionDenied
+, return False.
+   Unknown actions: default DENY, log warning.
+request_human_
+approval
+(
+action, 
+context_dict
+) -> str (
+approval_id
+):
+   Send Telegram: action requested, full context, YES/NO reply prompt.
+   Store pending approval in DB with 4-hour expiry.
+   Return 
+approval_id
+ for polling.
+check_approval
+(
+approval_id
+) -> bool:
+   Query DB for YES reply received AND not expired.
+log_
+action
+(
+action, result, agent='
+openclaw
+'):
+   Write to 
+AgentActionLog
+ table:
+   agent, action, result ('
+allowed'|'blocked'|'pending
+'), timestamp, notes.
+STEP
+23
+Observability — What 
+OpenClaw
+ Monitors
+Target: Week 8 — Day 3–4
+Your guide already has 
+HealthLog
+ and /pm/health. Expand it into a structured ops view that gives 
+OpenClaw
+ something objective to maintain against. The agent needs metrics in three areas: pipeline health, strategy health, and agent health.
+⚡  CURSOR
+ PROMPT — Paste this into Cursor AI
+Expand shared/dashboard/app.py with these new routes:
+GET /pm/ops/pipeline
+   
+last_market_fetch_by_source
+ (
+polymarket
+, 
+kalshi
+)
+   
+last_news_fetch_by_source
+ (
+newsapi
+, 
+rss_reuters
+, 
+rss_bbc
+, reddit)
+   
+cache_age_minutes
+, 
+stale_reading_count
+, db_write_failures_24h,
+   entity_extraction_failures_24h, 
+unmatched_article_rate
+,
+   
+duplicate_drop_rate
+, 
+baseline_coverage_rate_by_category
+GET /pm/ops/strategy
+   
+signals_fired_today_by_type
+   
+paper_bets_opened_today
+, 
+unresolved_market_backlog
+,
+   win_rate_7d, win_rate_30d, win_rate_90d,
+   
+calibration_drift
+ (compare 
+ev_estimate
+ to actual outcomes),
+   
+alert_to_bet_conversion_rate
+,
+   
+false_positive_rate_by_signal_type
+GET /pm/ops/agent
+   
+last
+_recommendation_made_at
+, 
+last_approved_change_at
+,
+   
+active_challengers_count
+, 
+promotion_success_rate
+,
+   rollback_count_30d, blocked_actions_24h
+GET /pm/ops/strategies
+   List all 
+StrategyVersions
+ with status, 
+created_by
+, snapshot summary.
+   Flag: which is champion, which challengers are running.
+Create engines/prediction_markets/governance/health_monitor.py
+with 
+HealthMonitor
+:
+run_health_
+check
+(
+) -> 
+HealthReport
+:
+   Collect all pipeline + strategy + agent metrics.
+   Flag any metric outside acceptable bounds.
+   Return structured 
+HealthReport
+ 
+with:
+ ok (bool), issues (list), warnings (list).
+OpenClaw
+ should call 
+run_health_
+check
+(
+) at the start of every
+improvement cycle before proposing any changes.
+If health check returns ok=False: fix issues first, do not create challengers.
+✅  Validation
+ Checklist — Confirm before moving on
+☐  
+StrategyVersion
+ table created with correct status 
+enum
+☐  
+StrategyPerformanceSnapshot
+ table created and indexed
+☐  
+SignalEvent
+ table created: all 4 signal types write rows on fire
+☐  
+SignalEvent
+ resolution hook: updates 
+final_outcome
+ when 
+PaperBet
+ resolves
+☐  
+strategy
+_registry
+: 
+get_
+champion
+(
+) returns correct current version
+☐  
+strategy
+_registry
+: 
+create_
+challenger
+(
+) rejects multi-key changes
+☐  
+strategy
+_registry
+: 
+rollback(
+) correctly restores previous champion
+☐  
+champion
+_challenger
+: 
+evaluate(
+) correctly blocks promotion when rules fail
+☐  
+champion
+_challenger
+: 
+run_paper_
+race
+(
+) tags 
+PaperBets
+ with 
+strategy_version_id
+☐  
+champion
+_challenger
+: never auto-promotes without human Telegram confirmation
+☐  
+agent
+_permissions
+: 'never' actions raise 
+PermissionDenied
+ and 
+log
+ CRITICAL
+☐  
+agent
+_permissions
+: '
+requires_human
+' actions send Telegram and return False
+☐  /
+pm/ops/pipeline endpoint returns fresh metrics with no placeholder values
+☐  /
+pm/ops/strategy endpoint shows win_rate_7d, win_rate_30d, win_rate_90d
+☐  /
+pm/ops/agent endpoint shows 
+blocked_actions
+ count and 
+rollback_count
+☐  
+health
+_monitor
+: 
+run_health_
+check
+(
+) returns ok=True on healthy system
+☐  
+health
+_
+monitor
+:
+ correctly flags a stale cache as an issue
+☐  First
+ challenger created by 
+OpenClaw
+: cloned from champion with 1 change
+PHASE 7
+Automation & Live Bet Execution
+Only after 90+ days of paper data shows consistent edge
+🔴  READ
+ THIS BEFORE PHASE 7
+Do not start Phase 7 until ALL of these are true simultaneously:
+  90+ days of paper bets logged with real market resolutions
+  50+ resolved bets per category you want to go live on
+  Win rate >= 54% sustained over last 60 days (not just best 30)
+  Positive EV demonstrated across at least 2 distinct signal types
+  Maximum weekly paper drawdown never exceeded 15 units
+  You understand the fee structure on both 
+Polymarket
+ and Kalshi
+  You have read the terms of service for both platforms
+  Starting live bankroll: small — 5-10% of what you plan to scale to
+STEP
+18
+Live Execution via 
+Polymarket
+ API
+Target: After 90 
+days
+ paper data
+ℹ️  
+Polymarket
+ Execution Notes
+Polymarket
+ supports programmatic trading via their CLOB (Central Limit Order Book) API.
+Requires: MetaMask wallet, USDC on Polygon, API key from 
+Polymarket
+.
+Minimum bet: $1 USDC. Gas fees on Polygon are negligible (<$0.01 per trade).
+The API is documented at: https://docs.polymarket.com/
+Kalshi supports API trading for verified US users (KYC required).
+⚡  CURSOR
+ PROMPT — Paste this into Cursor AI
+Create engines/prediction_markets/betting/bet_executor.py with 
+BetExecutor
+:
+SAFETY RULES (hard-coded, not configurable):
+  MAX_BET_USDC = 50         # never bet more than $50 on a single market
+  MAX_DAILY_SPEND = 200     # stop all execution if daily spend hits $200
+  MIN_LIQUIDITY = 10000     # never bet into a market with < $10k liquidity
+  MIN_EV = 0.08             # never execute if EV estimate < 8%
+  REQUIRE_HUMAN_CONFIRM = 
+True  #
+ default: always ask before executing
+execute_
+bet
+(
+opportunity, 
+stake_usdc
+, 
+require_confirm
+=True):
+  1. Re-fetch current market probability (prices change between alert and execution)
+  2. If probability moved > 0.03 from when alert fired: abort + alert user
+     'Market moved too much since alert — opportunity may be gone'
+  3. If 
+require_confirm
+: send Telegram with all bet details, wait for YES reply
+  4. Safety checks: liquidity, EV, daily 
+spend
+ limit
+  5. If all pass: submit order via 
+Polymarket
+ CLOB API
+  6. Log to 
+PaperBet
+ table with real=True flag (same schema, new column)
+  7. Monitor order fill status, alert if unfilled after 5 minutes
+Gradual automation schedule (follow this strictly):
+  Month 1 live: 
+require_confirm
+=True on ALL 
+bets
+. Human approves 
+every one
+.
+  Month 2 live: auto-execute on opportunities score > 0.85 AND 
+ev
+ > 0.12
+  Month 3+:     review auto-execute threshold based on live performance
+  Never remove the MAX_DAILY_SPEND or MAX_BET_USDC hard limits.
+CONFIG
+Master .env
+ Key Reference
+All new keys this system needs
+Key
+Purpose
+NEWSAPI_KEY
+NewsAPI.org free account — 100 calls/day
+ODDS_API_KEY
+The Odds API — free tier 500 req/month
+FRED_API_KEY
+FRED (St Louis Fed) — free, for macro baselines
+POLYMARKET_API_KEY
+Required only for Phase 7 live execution
+POLYMARKET_WALLET
+MetaMask wallet address for live execution
+KALSHI_API_KEY
+Required only for Phase 7 live execution
+AUTO_PAPER_BET
+true/false — auto paper bet on score > 0.7
+PM_POLL_INTERVAL_MINUTES
+15 — how often to fetch all markets
+NEWS_POLL_INTERVAL_MINUTES
+10 — how often to check news feeds
+PM_CACHE_MAX_AGE_HOURS
+4 — staleness limit before returning []
+PM_DEDUP_THRESHOLD
+70 — 
+rapidfuzz
+ score threshold for 
+dedup
+PM_MIN_SCORE
+0.3 — minimum market relevance score to track
+PM_MIN_EV
+0.08 — minimum EV to surface an opportunity
+PM_AUTO_BET_SCORE_THRESHOLD
+0.7 — score above which to auto paper bet
+PM_ALERT_RATE_LIMIT_HOURS
+2 — minimum hours between alerts per market
+PM_MAX_DAILY_ALERTS
+10 — maximum Telegram alerts per day
+MAX_BET_USDC
+50 — hard cap per live bet (Phase 7 only)
+MAX_DAILY_SPEND_USDC
+200 — daily live execution limit (Phase 7 only)
+DONE
+Master Completion Checklist
+The full system is live when every box below is checked
+Phase 1-3 — Data & Intelligence
+All 7 DB tables created and indexed
+Polymarket
+ pulls 500+ markets all categories
+Kalshi client using trading subdomain
+Theme assignment correct across 10 test cases
+Dedup
+ drops FOMC duplicate correctly
+News feeds polling every 10 min
+Entity extraction returns valid JSON
+News-market linking active
+News lag detection firing alerts
+Sports baseline from The Odds API
+Macro baseline from FRED API
+Outlier detector firing on 8%+ divergence
+Velocity scanner classifying movers
+Arbitrage scanner detecting correlated inconsistencies
+Phase 4-7 — Betting & Execution
+Paper bettor logging correctly
+Resolution 
+check
+ updating outcomes
+get_
+stats
+(
+) returning correct win rate
+Opportunity ranker combining all alert types
+Auto-paper-bet firing on score > 0.7
+Dashboard /pm routes all loading
+4 
+OpenClaw
+ skills responding
+Daily Telegram 
+digest
+ running at 8am
+Alert rate limiter working
+90 
+days
+ paper data collected
+50+ resolved bets per target category
+Win rate >= 54% sustained 60 days
+Phase 7: MAX_BET and MAX_DAILY limits verified
+Phase 7: 
+require_confirm
+=True on first live bets
+ℹ️  Fastest
+ Path to First Real Signal
+Day 1
+:  Phase
+ 1 scaffold, DB, 
+Polymarket
+ + Kalshi clients running
+Day 2
+:  Market
+ filter, 
+dedup
+, first full poll cycle with 200+ markets tracked
+Day 3
+:  News
+ feeds live, entity extraction working
+Day 4
+:  First
+ news-lag alert fires in Telegram
+Day 5
+:  Statistical
+ baselines from The Odds API + FRED
+Day 7
+:  First
+ outlier alert 
+fires — market
+ vs baseline divergence > threshold
+Day 8
+:  Paper
+ betting system running, first auto-paper-bets logged
+Day 10: 
+OpenClaw
+ skills all responding
+Week 3: Velocity and arbitrage scanners live
+Month 3: First live bets (if paper data justifies it)
+Build once. Let the data tell you where the edge is. Then scale what works.
