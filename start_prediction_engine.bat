@@ -8,16 +8,33 @@ set "VENV_ACTIVATE=%CD%\.venv\Scripts\activate.bat"
 set "OLLAMA_MODEL=qwen2.5:7b"
 
 if not exist "%VENV_ACTIVATE%" (
-  echo [ERROR] Virtual environment not found at:
-  echo         %VENV_ACTIVATE%
-  echo.
-  echo Create it first:
-  echo   python -m venv .venv
-  echo   .\.venv\Scripts\activate
-  echo   pip install -r requirements.txt
-  echo.
-  pause
-  exit /b 1
+  echo Virtual environment not found. Creating .venv ...
+  where python >nul 2>&1
+  if errorlevel 1 (
+    echo [ERROR] Python was not found in PATH.
+    echo Install Python 3.11+ and ensure "python" works in cmd.
+    pause
+    exit /b 1
+  )
+
+  python -m venv .venv
+  if errorlevel 1 (
+    echo [ERROR] Failed to create virtual environment.
+    pause
+    exit /b 1
+  )
+
+  echo Installing dependencies...
+  call "%VENV_ACTIVATE%"
+  pip install -r requirements.txt
+  if errorlevel 1 (
+    echo [ERROR] Failed to install dependencies.
+    pause
+    exit /b 1
+  )
+
+  REM Ensure path variable is available again outside prior call context.
+  set "VENV_ACTIVATE=%CD%\.venv\Scripts\activate.bat"
 )
 
 if not exist "logs" mkdir "logs"
@@ -54,7 +71,7 @@ echo Starting dashboard on http://localhost:8090 ...
 start "Prediction Dashboard" cmd /k "cd /d "%CD%" && call "%VENV_ACTIVATE%" && python -m uvicorn shared.dashboard.app:app --host 0.0.0.0 --port 8090"
 
 REM Give Uvicorn a moment to boot, then open browser.
-timeout /t 3 /nobreak >nul
+ping -n 4 127.0.0.1 >nul
 start "" "http://localhost:8090"
 
 echo.
